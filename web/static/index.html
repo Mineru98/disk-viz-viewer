@@ -81,6 +81,11 @@
             cursor: pointer;
         }
 
+        .search-box select option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+
         .search-box button {
             padding: 15px 30px;
             border: none;
@@ -109,6 +114,7 @@
             border-radius: 12px;
             margin-bottom: 20px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
         }
 
         .summary h2 {
@@ -120,6 +126,47 @@
         .summary .total {
             font-size: 2rem;
             font-weight: bold;
+        }
+
+        .cache-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .cache-badge {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+        }
+
+        .refresh-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+        }
+
+        .refresh-btn:hover {
+            background: rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .breadcrumb {
@@ -280,7 +327,8 @@
         </header>
 
         <div class="search-box">
-            <input type="text" id="pathInput" placeholder="Enter folder path (e.g., /home, /var)" value="/">
+            <select id="driveSelect" style="display: none;"></select>
+            <input type="text" id="pathInput" placeholder="Enter folder path" value="">
             <select id="depthSelect">
                 <option value="1">Depth: 1</option>
                 <option value="2">Depth: 2</option>
@@ -292,6 +340,10 @@
         <div id="breadcrumb" class="breadcrumb" style="display: none;"></div>
 
         <div id="summary" class="summary" style="display: none;">
+            <div class="cache-indicator" id="cacheIndicator" style="display: none;">
+                <span class="cache-badge" id="cacheBadge">캐시됨</span>
+                <button class="refresh-btn" id="refreshBtn" onclick="refreshCache()">갱신</button>
+            </div>
             <h2>Total Size</h2>
             <div class="total" id="totalSize"></div>
             <div class="path" id="rootPath"></div>
@@ -301,20 +353,219 @@
     </div>
 
     <script>
+        const CACHE_PREFIX = 'disk_viz_cache_';
         let currentData = null;
+        let osInfo = null;
+        let isWindows = false;
+        let isFromCache = false;
 
-        async function analyze(path) {
+        // 캐시 키 생성
+        function getCacheKey(path, depth) {
+            return CACHE_PREFIX + btoa(path + '|' + depth).replace(/[+/=]/g, '');
+        }
+
+        // 캐시에서 데이터 가져오기
+        function getCachedData(path, depth) {
+            try {
+                const cacheKey = getCacheKey(path, depth);
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    const data = JSON.parse(cached);
+                    // 캐시 데이터에 타임스탬프가 있으면 표시
+                    return data;
+                }
+            } catch (error) {
+                console.error('Failed to get cached data:', error);
+            }
+            return null;
+        }
+
+        // 캐시에 데이터 저장
+        function setCachedData(path, depth, data) {
+            try {
+                const cacheKey = getCacheKey(path, depth);
+                const cacheData = {
+                    ...data,
+                    cachedAt: new Date().toISOString()
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            } catch (error) {
+                console.error('Failed to save cached data:', error);
+                // 저장소가 가득 찬 경우 오래된 캐시 삭제 시도
+                if (error.name === 'QuotaExceededError') {
+                    clearOldCache();
+                    try {
+                        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+                    } catch (e) {
+                        console.error('Failed to save after clearing old cache:', e);
+                    }
+                }
+            }
+        }
+
+        // 오래된 캐시 정리 (최근 50개만 유지)
+        function clearOldCache() {
+            try {
+                const keys = Object.keys(localStorage).filter(key => key.startsWith(CACHE_PREFIX));
+                if (keys.length > 50) {
+                    // 타임스탬프 기준으로 정렬하여 오래된 것 삭제
+                    const cacheEntries = keys.map(key => {
+                        try {
+                            const data = JSON.parse(localStorage.getItem(key));
+                            return { key, cachedAt: data.cachedAt || 0 };
+                        } catch {
+                            return { key, cachedAt: 0 };
+                        }
+                    }).sort((a, b) => new Date(a.cachedAt) - new Date(b.cachedAt));
+
+                    // 오래된 항목 삭제
+                    const toDelete = cacheEntries.slice(0, cacheEntries.length - 50);
+                    toDelete.forEach(entry => localStorage.removeItem(entry.key));
+                }
+            } catch (error) {
+                console.error('Failed to clear old cache:', error);
+            }
+        }
+
+        // 캐시 표시 업데이트
+        function updateCacheIndicator(show, isCached) {
+            const cacheIndicator = document.getElementById('cacheIndicator');
+            const cacheBadge = document.getElementById('cacheBadge');
+            const refreshBtn = document.getElementById('refreshBtn');
+            
+            if (show) {
+                cacheIndicator.style.display = 'flex';
+                if (isCached) {
+                    cacheBadge.textContent = '캐시됨';
+                    cacheBadge.style.background = 'rgba(102, 126, 234, 0.2)';
+                    cacheBadge.style.color = '#667eea';
+                } else {
+                    cacheBadge.textContent = '최신';
+                    cacheBadge.style.background = 'rgba(76, 175, 80, 0.2)';
+                    cacheBadge.style.color = '#4caf50';
+                }
+                refreshBtn.disabled = false;
+            } else {
+                cacheIndicator.style.display = 'none';
+            }
+        }
+
+        // 페이지 로드 시 OS 정보 가져오기
+        async function loadOSInfo() {
+            try {
+                const response = await fetch('/api/os-info');
+                osInfo = await response.json();
+                isWindows = osInfo.isWindows;
+                
+                // 기본 경로 설정
+                const pathInput = document.getElementById('pathInput');
+                pathInput.value = osInfo.defaultPath;
+                
+                // Placeholder 설정
+                if (isWindows) {
+                    pathInput.placeholder = 'Enter folder path (e.g., C:\\Users, D:\\Projects)';
+                } else {
+                    pathInput.placeholder = 'Enter folder path (e.g., /home, /var)';
+                }
+                
+                // Windows인 경우 드라이브 선택 드롭다운 표시
+                if (isWindows && osInfo.drives && osInfo.drives.length > 0) {
+                    const driveSelect = document.getElementById('driveSelect');
+                    driveSelect.style.display = 'block';
+                    driveSelect.innerHTML = '<option value="">Select Drive</option>';
+                    osInfo.drives.forEach(drive => {
+                        const option = document.createElement('option');
+                        option.value = drive;
+                        option.textContent = drive;
+                        if (drive === osInfo.defaultPath) {
+                            option.selected = true;
+                        }
+                        driveSelect.appendChild(option);
+                    });
+                    
+                    // 드라이브 선택 시 경로 업데이트
+                    driveSelect.addEventListener('change', function() {
+                        if (this.value) {
+                            pathInput.value = this.value;
+                            analyze();
+                        }
+                    });
+                    
+                    // 경로 입력 시 드라이브 선택 업데이트
+                    pathInput.addEventListener('input', function() {
+                        const path = this.value.trim();
+                        if (isWindows && path.length >= 2 && path[1] === ':') {
+                            const drive = path.substring(0, 2) + '\\';
+                            if (driveSelect.querySelector(`option[value="${drive}"]`)) {
+                                driveSelect.value = drive;
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load OS info:', error);
+                // 기본값으로 Linux 설정
+                const pathInput = document.getElementById('pathInput');
+                pathInput.value = '/';
+                pathInput.placeholder = 'Enter folder path (e.g., /home, /var)';
+            }
+        }
+
+        async function analyze(path, forceRefresh = false) {
             const pathInput = document.getElementById('pathInput');
             const depthSelect = document.getElementById('depthSelect');
             const resultsDiv = document.getElementById('results');
             const summaryDiv = document.getElementById('summary');
             const analyzeBtn = document.getElementById('analyzeBtn');
 
-            const targetPath = path || pathInput.value.trim() || '/';
+            let targetPath = path || pathInput.value.trim();
+            
+            // 기본 경로 설정
+            if (!targetPath) {
+                if (isWindows && osInfo) {
+                    targetPath = osInfo.defaultPath;
+                } else {
+                    targetPath = '/';
+                }
+            }
+            
             pathInput.value = targetPath;
+            const depth = depthSelect.value;
+
+            // 캐시 확인 (강제 갱신이 아닌 경우)
+            if (!forceRefresh) {
+                const cachedData = getCachedData(targetPath, depth);
+                if (cachedData && !cachedData.error) {
+                    // 캐시된 데이터 표시
+                    isFromCache = true;
+                    currentData = cachedData;
+                    
+                    // 드라이브 선택 업데이트 (Windows인 경우)
+                    if (isWindows) {
+                        const driveSelect = document.getElementById('driveSelect');
+                        const path = cachedData.rootPath;
+                        if (path.length >= 2 && path[1] === ':') {
+                            const drive = path.substring(0, 2) + '\\';
+                            if (driveSelect && driveSelect.querySelector(`option[value="${drive}"]`)) {
+                                driveSelect.value = drive;
+                            }
+                        }
+                    }
+                    
+                renderBreadcrumb(cachedData.rootPath);
+                renderSummary(cachedData);
+                renderResults(cachedData);
+                // 캐시된 데이터 표시
+                const summaryDiv = document.getElementById('summary');
+                summaryDiv.style.display = 'block';
+                updateCacheIndicator(true, true);
+                    return;
+                }
+            }
 
             analyzeBtn.disabled = true;
             summaryDiv.style.display = 'none';
+            updateCacheIndicator(false, false);
             resultsDiv.innerHTML = `
                 <div class="loading">
                     <div class="spinner"></div>
@@ -323,37 +574,91 @@
             `;
 
             try {
-                const depth = depthSelect.value;
                 const response = await fetch(`/api/analyze?path=${encodeURIComponent(targetPath)}&depth=${depth}`);
                 const data = await response.json();
 
                 if (data.error) {
                     resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                    updateCacheIndicator(false, false);
                     return;
                 }
 
+                // 캐시에 저장
+                setCachedData(targetPath, depth, data);
+                isFromCache = false;
                 currentData = data;
+                
+                // 드라이브 선택 업데이트 (Windows인 경우)
+                if (isWindows) {
+                    const driveSelect = document.getElementById('driveSelect');
+                    const path = data.rootPath;
+                    if (path.length >= 2 && path[1] === ':') {
+                        const drive = path.substring(0, 2) + '\\';
+                        if (driveSelect && driveSelect.querySelector(`option[value="${drive}"]`)) {
+                            driveSelect.value = drive;
+                        }
+                    }
+                }
+                
                 renderBreadcrumb(data.rootPath);
                 renderSummary(data);
                 renderResults(data);
+                updateCacheIndicator(true, false);
             } catch (error) {
                 resultsDiv.innerHTML = `<div class="error">Failed to fetch data: ${error.message}</div>`;
+                updateCacheIndicator(false, false);
             } finally {
                 analyzeBtn.disabled = false;
             }
         }
 
+        // 캐시 갱신 함수
+        function refreshCache() {
+            const pathInput = document.getElementById('pathInput');
+            const targetPath = pathInput.value.trim();
+            if (targetPath) {
+                analyze(targetPath, true);
+            }
+        }
+
         function renderBreadcrumb(path) {
             const breadcrumbDiv = document.getElementById('breadcrumb');
-            const parts = path.split('/').filter(p => p);
+            
+            let parts;
+            let separator;
+            let rootPath;
+            
+            if (isWindows) {
+                // Windows 경로 처리
+                separator = '\\';
+                parts = path.split('\\').filter(p => p);
+                if (parts.length > 0 && parts[0].endsWith(':')) {
+                    rootPath = parts[0] + '\\';
+                    parts = parts.slice(1);
+                } else {
+                    rootPath = osInfo ? osInfo.defaultPath : 'C:\\';
+                }
+            } else {
+                // Linux 경로 처리
+                separator = '/';
+                parts = path.split('/').filter(p => p);
+                rootPath = '/';
+            }
 
-            let html = '<span onclick="analyze(\'/\')">Root</span>';
-            let currentPath = '';
+            // 경로 이스케이프 처리
+            const escapePath = (p) => p.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            
+            let html = `<span onclick="analyze('${escapePath(rootPath)}')">Root</span>`;
+            let currentPath = rootPath;
 
             parts.forEach((part, index) => {
-                currentPath += '/' + part;
-                const p = currentPath;
-                html += ` / <span onclick="analyze('${p}')">${part}</span>`;
+                if (isWindows) {
+                    currentPath += (currentPath.endsWith('\\') ? '' : '\\') + part;
+                } else {
+                    currentPath += '/' + part;
+                }
+                const p = escapePath(currentPath);
+                html += ` ${separator} <span onclick="analyze('${p}')">${part}</span>`;
             });
 
             breadcrumbDiv.innerHTML = html;
@@ -383,8 +688,11 @@
                 const icon = item.isDir ? '📁' : '📄';
                 const hasChildren = item.children && item.children.length > 0;
 
+                // 경로 이스케이프 처리
+                const escapedPath = item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                
                 html += `
-                    <div class="result-item" onclick="${item.isDir ? `analyze('${item.path}')` : ''}">
+                    <div class="result-item" onclick="${item.isDir ? `analyze('${escapedPath}')` : ''}">
                         <div class="icon">${icon}</div>
                         <div class="info">
                             <div class="name">
@@ -411,9 +719,11 @@
             return children.map(item => {
                 const percentage = maxSize > 0 ? (item.size / maxSize) * 100 : 0;
                 const icon = item.isDir ? '📁' : '📄';
+                // 경로 이스케이프 처리
+                const escapedPath = item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
                 return `
-                    <div class="result-item" onclick="${item.isDir ? `analyze('${item.path}')` : ''}">
+                    <div class="result-item" onclick="${item.isDir ? `analyze('${escapedPath}')` : ''}">
                         <div class="icon">${icon}</div>
                         <div class="info">
                             <div class="name">${item.name}</div>
@@ -451,7 +761,9 @@
         });
 
         // Initial load
-        analyze('/');
+        loadOSInfo().then(() => {
+            analyze();
+        });
     </script>
 </body>
 </html>

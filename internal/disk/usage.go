@@ -120,8 +120,8 @@ func GetDirSize(path string) (int64, error) {
 
 // AnalyzeDiskUsage analyzes disk usage for a given path
 func AnalyzeDiskUsage(rootPath string, depth int) (*UsageResult, error) {
-	// Clean and validate the path
-	rootPath = filepath.Clean(rootPath)
+	// Normalize and validate the path according to OS
+	rootPath = NormalizePath(rootPath)
 
 	info, err := os.Stat(rootPath)
 	if err != nil {
