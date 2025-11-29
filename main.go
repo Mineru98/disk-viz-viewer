@@ -14,7 +14,7 @@ import (
 var staticFS embed.FS
 
 func main() {
-	port := flag.Int("port", 8080, "Server port")
+	port := flag.Int("port", 8180, "Server port")
 	flag.Parse()
 
 	server := api.NewServer(staticFS)
