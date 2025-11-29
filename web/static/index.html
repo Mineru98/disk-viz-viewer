@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disk Usage Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .search-box input {
+            flex: 1;
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .search-box input::placeholder {
+            color: #888;
+        }
+
+        .search-box input:focus {
+            outline: 2px solid #667eea;
+        }
+
+        .search-box select {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .search-box button {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-box button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .search-box button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .summary {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .summary h2 {
+            font-size: 1.2rem;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .summary .total {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .breadcrumb span {
+            color: #667eea;
+            cursor: pointer;
+        }
+
+        .breadcrumb span:hover {
+            text-decoration: underline;
+        }
+
+        .results {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+
+        .result-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .result-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 1.5rem;
+        }
+
+        .info {
+            flex: 1;
+        }
+
+        .name {
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+
+        .path {
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .size-container {
+            text-align: right;
+            min-width: 120px;
+        }
+
+        .size {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .bar-container {
+            width: 100px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .bar {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #888;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: rgba(255, 82, 82, 0.1);
+            border: 1px solid rgba(255, 82, 82, 0.3);
+            padding: 20px;
+            border-radius: 12px;
+            color: #ff5252;
+            text-align: center;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 60px;
+            color: #888;
+        }
+
+        .children {
+            padding-left: 30px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .children .result-item {
+            padding: 10px 20px;
+        }
+
+        .toggle-children {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            padding: 5px 10px;
+            margin-left: 10px;
+            font-size: 0.85rem;
+        }
+
+        .toggle-children:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Disk Usage Viewer</h1>
+            <p class="subtitle">Visualize your disk space usage</p>
+        </header>
+
+        <div class="search-box">
+            <input type="text" id="pathInput" placeholder="Enter folder path (e.g., /home, /var)" value="/">
+            <select id="depthSelect">
+                <option value="1">Depth: 1</option>
+                <option value="2">Depth: 2</option>
+                <option value="3">Depth: 3</option>
+            </select>
+            <button id="analyzeBtn" onclick="analyze()">Analyze</button>
+        </div>
+
+        <div id="breadcrumb" class="breadcrumb" style="display: none;"></div>
+
+        <div id="summary" class="summary" style="display: none;">
+            <h2>Total Size</h2>
+            <div class="total" id="totalSize"></div>
+            <div class="path" id="rootPath"></div>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        async function analyze(path) {
+            const pathInput = document.getElementById('pathInput');
+            const depthSelect = document.getElementById('depthSelect');
+            const resultsDiv = document.getElementById('results');
+            const summaryDiv = document.getElementById('summary');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+
+            const targetPath = path || pathInput.value.trim() || '/';
+            pathInput.value = targetPath;
+
+            analyzeBtn.disabled = true;
+            summaryDiv.style.display = 'none';
+            resultsDiv.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Analyzing disk usage...</p>
+                </div>
+            `;
+
+            try {
+                const depth = depthSelect.value;
+                const response = await fetch(`/api/analyze?path=${encodeURIComponent(targetPath)}&depth=${depth}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                currentData = data;
+                renderBreadcrumb(data.rootPath);
+                renderSummary(data);
+                renderResults(data);
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Failed to fetch data: ${error.message}</div>`;
+            } finally {
+                analyzeBtn.disabled = false;
+            }
+        }
+
+        function renderBreadcrumb(path) {
+            const breadcrumbDiv = document.getElementById('breadcrumb');
+            const parts = path.split('/').filter(p => p);
+
+            let html = '<span onclick="analyze(\'/\')">Root</span>';
+            let currentPath = '';
+
+            parts.forEach((part, index) => {
+                currentPath += '/' + part;
+                const p = currentPath;
+                html += ` / <span onclick="analyze('${p}')">${part}</span>`;
+            });
+
+            breadcrumbDiv.innerHTML = html;
+            breadcrumbDiv.style.display = 'flex';
+        }
+
+        function renderSummary(data) {
+            const summaryDiv = document.getElementById('summary');
+            document.getElementById('totalSize').textContent = data.totalStr;
+            document.getElementById('rootPath').textContent = data.rootPath;
+            summaryDiv.style.display = 'block';
+        }
+
+        function renderResults(data) {
+            const resultsDiv = document.getElementById('results');
+
+            if (!data.items || data.items.length === 0) {
+                resultsDiv.innerHTML = '<div class="empty">No items found in this directory</div>';
+                return;
+            }
+
+            const maxSize = Math.max(...data.items.map(item => item.size));
+
+            let html = '';
+            data.items.forEach((item, index) => {
+                const percentage = maxSize > 0 ? (item.size / maxSize) * 100 : 0;
+                const icon = item.isDir ? '📁' : '📄';
+                const hasChildren = item.children && item.children.length > 0;
+
+                html += `
+                    <div class="result-item" onclick="${item.isDir ? `analyze('${item.path}')` : ''}">
+                        <div class="icon">${icon}</div>
+                        <div class="info">
+                            <div class="name">
+                                ${item.name}
+                                ${hasChildren ? `<button class="toggle-children" onclick="event.stopPropagation(); toggleChildren(${index})">Show children</button>` : ''}
+                            </div>
+                            <div class="path">${item.path}</div>
+                        </div>
+                        <div class="size-container">
+                            <div class="size">${item.sizeStr}</div>
+                            <div class="bar-container">
+                                <div class="bar" style="width: ${percentage}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    ${hasChildren ? `<div class="children" id="children-${index}" style="display: none;">${renderChildren(item.children, maxSize)}</div>` : ''}
+                `;
+            });
+
+            resultsDiv.innerHTML = html;
+        }
+
+        function renderChildren(children, maxSize) {
+            return children.map(item => {
+                const percentage = maxSize > 0 ? (item.size / maxSize) * 100 : 0;
+                const icon = item.isDir ? '📁' : '📄';
+
+                return `
+                    <div class="result-item" onclick="${item.isDir ? `analyze('${item.path}')` : ''}">
+                        <div class="icon">${icon}</div>
+                        <div class="info">
+                            <div class="name">${item.name}</div>
+                            <div class="path">${item.path}</div>
+                        </div>
+                        <div class="size-container">
+                            <div class="size">${item.sizeStr}</div>
+                            <div class="bar-container">
+                                <div class="bar" style="width: ${percentage}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleChildren(index) {
+            const childrenDiv = document.getElementById(`children-${index}`);
+            const button = event.target;
+
+            if (childrenDiv.style.display === 'none') {
+                childrenDiv.style.display = 'block';
+                button.textContent = 'Hide children';
+            } else {
+                childrenDiv.style.display = 'none';
+                button.textContent = 'Show children';
+            }
+        }
+
+        // Enter key handler
+        document.getElementById('pathInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                analyze();
+            }
+        });
+
+        // Initial load
+        analyze('/');
+    </script>
+</body>
+</html>
